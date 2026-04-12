@@ -5,7 +5,19 @@ import subprocess
 import sys
 import msvcrt
 import warnings
+import ctypes
+from ctypes import wintypes
 from pathlib import Path
+
+class CONSOLE_CURSOR_INFO(ctypes.Structure):
+    _fields_ = [("dwSize", wintypes.DWORD), ("bVisible", wintypes.BOOL)]
+
+def set_cursor_visible(visible):
+    handle = ctypes.windll.kernel32.GetStdHandle(-11)
+    info = CONSOLE_CURSOR_INFO()
+    ctypes.windll.kernel32.GetConsoleCursorInfo(handle, ctypes.byref(info))
+    info.bVisible = visible
+    ctypes.windll.kernel32.SetConsoleCursorInfo(handle, ctypes.byref(info))
 
 # 获取常用路径
 ENV = os.environ
@@ -83,9 +95,8 @@ def find_and_clean_leftovers(keyword, tag="扫描"):
                     found.append(line)
         except Exception: pass
     
-    print(f"[{tag}] 深度搜索完成，发现 {len(found)} 项")
-    
     if found:
+        print(f"[{tag}] 深度搜索完成，发现 {len(found)} 项")
         unique_found = sorted(list(set(found)), key=len, reverse=True)
         for p in unique_found: print(f"  - {p}")
         
@@ -190,6 +201,19 @@ def cleanup_openclaw():
     for p in (HOME / ".bun" / "install" / "cache").glob("*openclaw*"): rm_path(p, tag, silent=True)
     find_and_clean_leftovers("openclaw", tag)
 
+def cleanup_ollama():
+    tag = "Ollama"
+    paths = [
+        HOME / ".ollama",
+        LOCAL / "Ollama",
+        APPDATA / "Ollama",
+        LOCAL / "Programs" / "Ollama",
+        HOME / ".config" / "ollama",
+        HOME / "Desktop" / "Ollama.lnk",
+    ]
+    for p in paths: rm_path(p, tag, silent=True)
+    find_and_clean_leftovers("ollama", tag)
+
 def cleanup_claude_router():
     tag = "Claude Code Router"
     uninstall_npm(["@musistudio/claude-code-router"], tag)
@@ -209,9 +233,12 @@ def main():
         ("Claude Code Router", cleanup_claude_router),
         ("Gemini CLI", cleanup_gemini),
         ("iFlow CLI", cleanup_iflow),
+        ("Ollama", cleanup_ollama),
         ("OpenClaw", cleanup_openclaw),
         ("OpenCode", cleanup_opencode),
     ]
+    menu.sort(key=lambda x: x[0].lower())
+    set_cursor_visible(False)
 
     while True:
         clear_screen()
