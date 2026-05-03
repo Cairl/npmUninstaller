@@ -2,10 +2,10 @@ import os
 import shutil
 import stat
 import subprocess
-import sys
 import msvcrt
 import warnings
 import ctypes
+import atexit
 from ctypes import wintypes
 from pathlib import Path
 
@@ -19,14 +19,20 @@ def set_cursor_visible(visible):
     info.bVisible = visible
     ctypes.windll.kernel32.SetConsoleCursorInfo(handle, ctypes.byref(info))
 
-# 获取常用路径
+def move_cursor_up(lines):
+    handle = ctypes.windll.kernel32.GetStdHandle(-11)
+    info = ctypes.wintypes.CONSOLE_SCREEN_BUFFER_INFO()
+    ctypes.windll.kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(info))
+    pos = info.dwCursorPosition
+    pos.Y -= lines
+    ctypes.windll.kernel32.SetConsoleCursorPosition(handle, pos)
+
 ENV = os.environ
 APPDATA = Path(ENV.get("APPDATA", ""))
 LOCAL = Path(ENV.get("LOCALAPPDATA", ""))
 HOME = Path(ENV.get("USERPROFILE", ""))
 
 def remove_readonly(func, path, _):
-    """清除只读属性并重试删除"""
     try:
         os.chmod(path, stat.S_IWRITE)
         func(path)
@@ -78,12 +84,12 @@ def uninstall_npm(packages, tag="清理"):
 def find_and_clean_leftovers(keyword, tag="扫描"):
     print(f"[{tag}] 正在深度搜索残留项...")
     
-    roots = ["C:\\Users\\", "C:\\ProgramData\\", "C:\\\"Program Files\"\\", "C:\\\"Program Files (x86)\"\\"]
+    roots = ["C:\\Users\\", "C:\\ProgramData\\", "C:\\Program Files\\", "C:\\Program Files (x86)\\"]
     found = []
     
     for root in roots:
         try:
-            cmd = f'dir /s /b /a {root}*{keyword}* 2>nul'
+            cmd = f'dir /s /b /a "{root}*{keyword}*" 2>nul'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='gbk', errors='ignore')
             if result.stdout:
                 lines = result.stdout.strip().splitlines()
@@ -107,7 +113,7 @@ def find_and_clean_leftovers(keyword, tag="扫描"):
         else:
             try:
                 choice = char.decode('utf-8').upper()
-            except:
+            except Exception:
                 choice = 'N'
         print(choice)
         
@@ -173,13 +179,13 @@ def cleanup_openclaw():
     tag = "OpenClaw"
     try:
         subprocess.run(["openclaw", "uninstall", "--all", "--yes", "--non-interactive"], check=False, capture_output=True)
-    except: pass
+    except Exception: pass
 
     uninstall_npm(["openclaw"], tag)
     
     try:
         subprocess.run(["schtasks", "/Delete", "/TN", "OpenClaw Gateway", "/F"], check=False, capture_output=True)
-    except: pass
+    except Exception: pass
 
     paths = [
         HOME / ".openclaw",
@@ -214,6 +220,43 @@ def cleanup_ollama():
     for p in paths: rm_path(p, tag, silent=True)
     find_and_clean_leftovers("ollama", tag)
 
+def cleanup_cc_switch():
+    tag = "cc-switch"
+    paths = [
+        HOME / ".cc-switch",
+        LOCAL / "cc-switch",
+        APPDATA / "cc-switch",
+        HOME / ".config" / "cc-switch",
+        HOME / "Desktop" / "cc-switch.lnk",
+    ]
+    for p in paths: rm_path(p, tag, silent=True)
+    find_and_clean_leftovers("cc-switch", tag)
+
+def cleanup_codex_cli():
+    tag = "Codex CLI"
+    uninstall_npm(["@openai/codex"], tag)
+    paths = [
+        HOME / ".codex",
+        LOCAL / "Codex",
+        APPDATA / "Codex",
+        HOME / ".config" / "codex",
+        HOME / "Desktop" / "Codex.lnk",
+    ]
+    for p in paths: rm_path(p, tag, silent=True)
+    find_and_clean_leftovers("codex", tag)
+
+def cleanup_codex():
+    tag = "Codex"
+    paths = [
+        HOME / ".codex",
+        LOCAL / "Codex",
+        APPDATA / "Codex",
+        HOME / ".config" / "codex",
+        HOME / "Desktop" / "Codex.lnk",
+    ]
+    for p in paths: rm_path(p, tag, silent=True)
+    find_and_clean_leftovers("codex", tag)
+
 def cleanup_claude_router():
     tag = "Claude Code Router"
     uninstall_npm(["@musistudio/claude-code-router"], tag)
@@ -227,39 +270,107 @@ def cleanup_claude_router():
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+def get_key():
+    ch = msvcrt.getch()
+    if ch == b'\x00' or ch == b'\xe0':
+        ch = msvcrt.getch()
+        return ch
+    return ch
+
+ARROW_UP = b'H'
+ARROW_DOWN = b'P'
+ENTER = b'\r'
+ESC = b'\x1b'
+
+HIGHLIGHT = "\033[7m"
+GRAY_BG = "\033[100m"
+RESET = "\033[0m"
+
+def render_menu(uninstall_items, clean_items, selected):
+    clear_screen()
+
+    all_names = [name for name, _ in uninstall_items + clean_items]
+    max_name = max(len(name) for name in all_names)
+    inner = max(max_name + 4, 24)
+    bar = "─" * inner
+
+    def section_header(title):
+        dw = len(title) * 2
+        pad_l = (inner - dw) // 2
+        pad_r = inner - dw - pad_l
+        body = f"{' ' * pad_l}{title}{' ' * pad_r}"
+        print(f"│{GRAY_BG}{body}{RESET}│")
+
+    def item(name, active):
+        body = f"  {name}"
+        padded = f"{body:<{inner}}"
+        if active:
+            print(f"│{HIGHLIGHT}{padded}{RESET}│")
+        else:
+            print(f"│{padded}│")
+
+    print(f"┌{bar}┐")
+    section_header("卸载")
+    for i, (name, _) in enumerate(uninstall_items):
+        item(name, selected == i)
+
+    section_header("清除")
+    offset = len(uninstall_items)
+    for i, (name, _) in enumerate(clean_items):
+        item(name, selected == offset + i)
+
+    print(f"└{bar}┘")
+
 def main():
-    menu = [
+    uninstall_items = [
         ("Claude Code", cleanup_claude),
         ("Claude Code Router", cleanup_claude_router),
+        ("Codex CLI", cleanup_codex_cli),
         ("Gemini CLI", cleanup_gemini),
         ("iFlow CLI", cleanup_iflow),
-        ("Ollama", cleanup_ollama),
         ("OpenClaw", cleanup_openclaw),
         ("OpenCode", cleanup_opencode),
     ]
-    menu.sort(key=lambda x: x[0].lower())
+    uninstall_items.sort(key=lambda x: x[0].lower())
+
+    clean_items = [
+        ("Codex", cleanup_codex),
+        ("Ollama", cleanup_ollama),
+    ]
+    clean_items.sort(key=lambda x: x[0].lower())
+
+    total_items = len(uninstall_items) + len(clean_items)
+    selected = 0
+
     set_cursor_visible(False)
+    atexit.register(set_cursor_visible, True)
 
-    while True:
-        clear_screen()
-        for i, (name, _) in enumerate(menu, 1):
-            print(f" [{i}] 卸载 {name}")
-        print("\n> ", end="", flush=True)
+    try:
+        while True:
+            render_menu(uninstall_items, clean_items, selected)
 
-        try:
-            char = msvcrt.getch().decode('utf-8').upper()
-        except: continue
-        
-        print(char)
+            key = get_key()
 
-        if char.isdigit():
-            idx = int(char) - 1
-            if 0 <= idx < len(menu):
-                name, func = menu[idx]
-                print()  # 换行美化
+            if key == ARROW_UP:
+                selected = (selected - 1) % total_items
+            elif key == ARROW_DOWN:
+                selected = (selected + 1) % total_items
+            elif key == ENTER:
+                if selected < len(uninstall_items):
+                    name, func = uninstall_items[selected]
+                else:
+                    name, func = clean_items[selected - len(uninstall_items)]
+                clear_screen()
                 func()
                 print("\n任务已完成！按任意键返回菜单...")
                 msvcrt.getch()
+            elif key == ESC:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        set_cursor_visible(True)
+        clear_screen()
 
 if __name__ == "__main__":
     main()
