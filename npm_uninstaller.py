@@ -150,6 +150,17 @@ def cleanup_gemini():
     for p in paths: rm_path(p, tag, silent=True)
     find_and_clean_leftovers("gemini", tag)
 
+def cleanup_hermes_agent():
+    tag = "Hermes Agent"
+    uninstall_npm(["hermes-agent"], tag)
+    paths = [
+        APPDATA / "hermes-agent", LOCAL / "hermes-agent", HOME / ".hermes-agent",
+        HOME / ".hermes", HOME / ".config" / "hermes-agent",
+        HOME / "Desktop" / "Hermes Agent.lnk"
+    ]
+    for p in paths: rm_path(p, tag, silent=True)
+    find_and_clean_leftovers("hermes", tag)
+
 def cleanup_iflow():
     tag = "iFlow CLI"
     uninstall_npm(["@iflow-ai/iflow-cli"], tag)
@@ -327,6 +338,7 @@ def main():
         ("Claude Code Router", cleanup_claude_router),
         ("Codex CLI", cleanup_codex_cli),
         ("Gemini CLI", cleanup_gemini),
+        ("Hermes Agent", cleanup_hermes_agent),
         ("iFlow CLI", cleanup_iflow),
         ("OpenClaw", cleanup_openclaw),
         ("OpenCode", cleanup_opencode),
